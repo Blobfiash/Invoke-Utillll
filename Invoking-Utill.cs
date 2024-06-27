@@ -1,5 +1,13 @@
-﻿using System;
 using System.Reflection;
+using System;
+
+public static class ReflectionExtensions
+{
+    public static ReflectionUtil<T> Sys<T>(this T obj)
+    {
+        return new ReflectionUtil<T>(obj);
+    }
+}
 
 public class ReflectionUtil<T>
 {
