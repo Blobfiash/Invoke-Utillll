@@ -1,117 +1,62 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using UnityEngine;
 
-namespace Util
+namespace Utils
 {
-    //Idea from MainCool
+    // Idea from MainCool
     public class INVOKEUTILL<R>
     {
-        private const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;
-        private const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
-        private const BindingFlags PrivateField = PrivateInstance | BindingFlags.GetField;
-        private const BindingFlags PrivateProperty = PrivateInstance | BindingFlags.GetProperty;
-        private const BindingFlags StaticField = PrivateStatic | BindingFlags.GetField;
-        private const BindingFlags StaticProperty = PrivateStatic | BindingFlags.GetProperty;
-        private const BindingFlags PrivateMethod = PrivateInstance | BindingFlags.InvokeMethod;
-        private const BindingFlags StaticMethod = PrivateStatic | BindingFlags.InvokeMethod;
-        private const BindingFlags InternalMethod = BindingFlags.NonPublic | BindingFlags.InvokeMethod;
+        private const BindingFlags PrivateFlags = BindingFlags.NonPublic | BindingFlags.Instance;
+        private const BindingFlags StaticFlags = BindingFlags.NonPublic | BindingFlags.Static;
+        private R Obj { get; }
+        private Type Type => typeof(R);
 
-        private R Object { get; }
-        private Type Type { get; }
+        internal INVOKEUTILL(R obj) => Obj = obj;
 
-        internal INVOKEUTILL(R obj)
-        {
-            Object = obj ?? throw new ArgumentNullException(nameof(obj));
-            Type = typeof(R);
-        }
-
-        private T GetValue<T>(string name, BindingFlags flags)
-        {
-            try
-            {
-                var field = Type.GetField(name, flags);
-                return field != null ? (T)field.GetValue(Object) : default;
-            }
-            catch { return default; }
-        }
-
-        private T GetProperty<T>(string name, BindingFlags flags)
-        {
-            try
-            {
-                var property = Type.GetProperty(name, flags);
-                return property != null ? (T)property.GetValue(Object) : default;
-            }
-            catch { return default; }
-        }
+        private T GetValue<T>(string name, BindingFlags flags) =>  Try<T>(() => (T)(Type.GetField(name, flags)?.GetValue(Obj) ?? Type.GetProperty(name, flags)?.GetValue(Obj)));
 
         private INVOKEUTILL<R> SetValue(string name, object value, BindingFlags flags)
         {
-            try
-            {
-                var field = Type.GetField(name, flags);
-                if (field != null) field.SetValue(Object, value);
-            }
-            catch { }
+            Try<object>(() => { Type.GetField(name, flags)?.SetValue(Obj, value); return null; });
+            Try<object>(() => { Type.GetProperty(name, flags)?.SetValue(Obj, value); return null; });
             return this;
         }
 
-        private INVOKEUTILL<R> SetProperty(string name, object value, BindingFlags flags)
-        {
-            try
-            {
-                var property = Type.GetProperty(name, flags);
-                if (property != null) property.SetValue(Object, value);
-            }
-            catch { }
-            return this;
-        }
-
-        private T InvokeMethod<T>(string name, BindingFlags flags, params object[] args)
-        {
-            try
+        private T InvokeMethod<T>(string name, BindingFlags flags, params object[] args) =>
+            Try<T>(() =>
             {
                 var method = Type.GetMethods(flags).FirstOrDefault(m =>
                     m.Name == name && m.GetParameters().Length == args.Length &&
                     m.GetParameters().Select(p => p.ParameterType).SequenceEqual(args.Select(a => a?.GetType() ?? typeof(object))));
-                return method != null ? (T)method.Invoke(Object, args) : default;
-            }
+                return method != null ? (T)method.Invoke(Obj, args) : default;
+            });
+
+        private static T Try<T>(Func<T> func)
+        {
+            try { return func(); }
             catch { return default; }
         }
 
-        public T GetValue<T>(string name, bool isStatic = false, bool isProperty = false)
-        {
-            var flags = isProperty ? (isStatic ? StaticProperty : PrivateProperty) : (isStatic ? StaticField : PrivateField);
-            return isProperty ? GetProperty<T>(name, flags) : GetValue<T>(name, flags);
-        }
+        public T GetValue<T>(string name, bool isStatic = false, bool isProperty = false) => GetValue<T>(name, (isStatic ? StaticFlags : PrivateFlags) | (isProperty ? BindingFlags.GetProperty : BindingFlags.GetField));
 
-        public INVOKEUTILL<R> SetValue(string name, object value, bool isStatic = false, bool isProperty = false)
-        {
-            var flags = isProperty ? (isStatic ? StaticProperty : PrivateProperty) : (isStatic ? StaticField : PrivateField);
-            return isProperty ? SetProperty(name, value, flags) : SetValue(name, value, flags);
-        }
+        public INVOKEUTILL<R> SetValue(string name, object value, bool isStatic = false, bool isProperty = false) => SetValue(name, value, (isStatic ? StaticFlags : PrivateFlags) | (isProperty ? BindingFlags.SetProperty : BindingFlags.SetField));
 
-        public T InvokeInternalMethod<T>(string name, params object[] args) => InvokeMethod<T>(name, InternalMethod, args);
-        public T Invoke<T>(string name, params object[] args) => InvokeMethod<T>(name, PrivateMethod, args);
+        public T Invoke<T>(string name, params object[] args) => InvokeMethod<T>(name, PrivateFlags | BindingFlags.InvokeMethod, args);
 
-        public object GetValue(string name, bool isStatic = false, bool isProperty = false) => GetValue<R>(name, isStatic, isProperty);
+        public T InvokeInternalMethod<T>(string name, params object[] args) => InvokeMethod<T>(name, BindingFlags.NonPublic | BindingFlags.InvokeMethod, args);
 
-        public INVOKEUTILL<R> Invoke(string name, params object[] args) => Invoke<R>(name, args)?.Ref();
+        public bool HasField(string name) => Type.GetField(name, PrivateFlags | StaticFlags) != null;
 
-        public bool HasField(string name) => Type.GetField(name, PrivateField) != null || Type.GetField(name, StaticField) != null;
-        public bool HasProperty(string name) => Type.GetProperty(name, PrivateProperty) != null || Type.GetProperty(name, StaticProperty) != null;
-        public bool HasMethod(string name) => Type.GetMethods(PrivateMethod).Any(m => m.Name == name) || Type.GetMethods(StaticMethod).Any(m => m.Name == name);
+        public bool HasProperty(string name) =>  Type.GetProperty(name, PrivateFlags | StaticFlags) != null;
 
-        public Type GetFieldType(string name) => Type.GetField(name, PrivateField)?.FieldType ?? Type.GetField(name, StaticField)?.FieldType;
+        public bool HasMethod(string name) => Type.GetMethods(PrivateFlags | StaticFlags).Any(m => m.Name == name);
 
-        public Type GetPropertyType(string name) => Type.GetProperty(name, PrivateProperty)?.PropertyType ?? Type.GetProperty(name, StaticProperty)?.PropertyType;
+        public Type GetFieldType(string name) => Type.GetField(name, PrivateFlags | StaticFlags)?.FieldType;
 
-        public object[] GetMethodParameters(string name) => Type.GetMethods(PrivateMethod)
-            .Where(m => m.Name == name)
-            .Select(m => m.GetParameters().Select(p => p.ParameterType).ToArray())
-            .FirstOrDefault();
+        public Type GetPropertyType(string name) => Type.GetProperty(name, PrivateFlags | StaticFlags)?.PropertyType;
+
+        public object[] GetMethodParameters(string name) => Type.GetMethods(PrivateFlags | StaticFlags).FirstOrDefault(m => m.Name == name)?.GetParameters().Select(p => p.ParameterType).ToArray();
     }
 
     public static class ReflectorExtensions
